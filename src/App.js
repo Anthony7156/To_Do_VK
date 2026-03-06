@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import bridge from '@vkontakte/vk-bridge';
 import './App.css';
 
 const STORAGE_KEY = 'todo_app_data';
@@ -9,91 +8,56 @@ const App = () => {
   const [newTask, setNewTask] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
-  const [userInfo, setUserInfo] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [error, setError] = useState(null);
 
+  
   useEffect(() => {
-    const initApp = async () => {
-      try {
-        // Пытаемся получить данные пользователя (может не работать в локальной разработке)
-        try {
-          const user = await bridge.send('VKWebAppGetUserInfo');
-          setUserInfo(user);
-        } catch (userError) {
-          console.log('Could not get user info (normal in development)');
-          // Устанавливаем тестового пользователя для разработки
-          setUserInfo({
-            first_name: 'Тестовый',
-            last_name: 'Пользователь',
-            photo_100: 'https://vk.com/images/camera_100.png'
-          });
-        }
-
-        // Загружаем задачи
-        let savedTasks = [];
-        
-        // Пробуем загрузить из VK Storage
-        try {
-          const storageData = await bridge.send('VKWebAppStorageGet', {
-            keys: [STORAGE_KEY]
-          });
-          
-          if (storageData.keys && storageData.keys[0] && storageData.keys[0].value) {
-            savedTasks = JSON.parse(storageData.keys[0].value);
-          }
-        } catch (storageError) {
-          console.log('Could not load from VK Storage, trying localStorage');
-          // Если не удалось загрузить из VK Storage, пробуем localStorage
-          const localData = localStorage.getItem(STORAGE_KEY);
-          if (localData) {
-            savedTasks = JSON.parse(localData);
-          }
-        }
-
-        setTasks(savedTasks);
-      } catch (error) {
-        console.error('Error initializing app:', error);
-        setError('Произошла ошибка при загрузке приложения');
-        
-        // Пробуем загрузить из localStorage как последнюю надежду
-        try {
-          const localData = localStorage.getItem(STORAGE_KEY);
-          if (localData) {
-            setTasks(JSON.parse(localData));
-          }
-        } catch (e) {
-          console.error('Could not load from localStorage either');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initApp();
-  }, []);
-
-  const saveTasks = async (updatedTasks) => {
+    console.log('Loading tasks from localStorage...');
     try {
-      // Сохраняем в localStorage всегда (для надежности)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTasks));
-      
-      // Пытаемся сохранить в VK Storage
-      try {
-        await bridge.send('VKWebAppStorageSet', {
-          key: STORAGE_KEY,
-          value: JSON.stringify(updatedTasks)
-        });
-      } catch (vkError) {
-        console.log('Could not save to VK Storage, but saved to localStorage');
+      const savedTasks = localStorage.getItem(STORAGE_KEY);
+      if (savedTasks) {
+        setTasks(JSON.parse(savedTasks));
+        console.log('Tasks loaded:', JSON.parse(savedTasks));
+      } else {
+        
+        const demoTasks = [
+          {
+            id: 1,
+            text: 'Купить продукты',
+            completed: false,
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: 2,
+            text: 'Сделать зарядку',
+            completed: true,
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: 3,
+            text: 'Почитать книгу',
+            completed: false,
+            createdAt: new Date().toISOString()
+          }
+        ];
+        setTasks(demoTasks);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(demoTasks));
+        console.log('Demo tasks created');
       }
     } catch (error) {
-      console.error('Error saving tasks:', error);
+      console.error('Error loading tasks:', error);
     }
-  };
+  }, []);
 
-  const addTask = async (e) => {
+  
+  useEffect(() => {
+    if (tasks.length > 0) {
+      console.log('Saving tasks to localStorage:', tasks);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    }
+  }, [tasks]);
+
+  const addTask = (e) => {
     e.preventDefault();
     if (!newTask.trim()) return;
 
@@ -104,24 +68,18 @@ const App = () => {
       createdAt: new Date().toISOString()
     };
 
-    const updatedTasks = [...tasks, newTaskObj];
-    setTasks(updatedTasks);
-    await saveTasks(updatedTasks);
+    setTasks([...tasks, newTaskObj]);
     setNewTask('');
   };
 
-  const deleteTask = async (id) => {
-    const updatedTasks = tasks.filter(task => task.id !== id);
-    setTasks(updatedTasks);
-    await saveTasks(updatedTasks);
+  const deleteTask = (id) => {
+    setTasks(tasks.filter(task => task.id !== id));
   };
 
-  const toggleTask = async (id) => {
-    const updatedTasks = tasks.map(task =>
+  const toggleTask = (id) => {
+    setTasks(tasks.map(task =>
       task.id === id ? { ...task, completed: !task.completed } : task
-    );
-    setTasks(updatedTasks);
-    await saveTasks(updatedTasks);
+    ));
   };
 
   const startEdit = (task) => {
@@ -129,17 +87,15 @@ const App = () => {
     setEditText(task.text);
   };
 
-  const saveEdit = async (id) => {
+  const saveEdit = (id) => {
     if (!editText.trim()) {
       deleteTask(id);
       return;
     }
 
-    const updatedTasks = tasks.map(task =>
+    setTasks(tasks.map(task =>
       task.id === id ? { ...task, text: editText.trim() } : task
-    );
-    setTasks(updatedTasks);
-    await saveTasks(updatedTasks);
+    ));
     setEditingId(null);
     setEditText('');
   };
@@ -149,10 +105,8 @@ const App = () => {
     setEditText('');
   };
 
-  const clearCompleted = async () => {
-    const updatedTasks = tasks.filter(task => !task.completed);
-    setTasks(updatedTasks);
-    await saveTasks(updatedTasks);
+  const clearCompleted = () => {
+    setTasks(tasks.filter(task => !task.completed));
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -165,41 +119,20 @@ const App = () => {
   const completedTasks = tasks.filter(t => t.completed).length;
   const activeTasks = totalTasks - completedTasks;
 
-  if (loading) {
-    return (
-      <div className="app">
-        <div className="loading">Загрузка...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="app">
-        <div className="error-message">{error}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="app">
       <header className="app-header">
         <h1>Мой список дел</h1>
-        {userInfo && (
-          <div className="user-info">
-            <img 
-              src={userInfo.photo_100} 
-              alt={`${userInfo.first_name} ${userInfo.last_name}`}
-              className="user-avatar"
-              onError={(e) => {
-                e.target.src = 'https://vk.com/images/camera_100.png';
-              }}
-            />
-            <span className="user-name">
-              {userInfo.first_name} {userInfo.last_name}
-            </span>
-          </div>
-        )}
+        <div className="user-info">
+          <img 
+            src="https://vk.com/images/camera_100.png" 
+            alt="Пользователь"
+            className="user-avatar"
+          />
+          <span className="user-name">
+            Тестовый пользователь
+          </span>
+        </div>
       </header>
 
       <main className="app-main">
@@ -284,14 +217,12 @@ const App = () => {
                       <button
                         onClick={() => saveEdit(task.id)}
                         className="save-button"
-                        aria-label="Сохранить"
                       >
                         ✓
                       </button>
                       <button
                         onClick={cancelEdit}
                         className="cancel-button"
-                        aria-label="Отмена"
                       >
                         ✗
                       </button>
@@ -305,12 +236,10 @@ const App = () => {
                         checked={task.completed}
                         onChange={() => toggleTask(task.id)}
                         className="task-checkbox"
-                        aria-label={`Отметить задачу "${task.text}" как ${task.completed ? 'невыполненную' : 'выполненную'}`}
                       />
                       <span
                         className="task-text"
                         onDoubleClick={() => startEdit(task)}
-                        title="Двойной клик для редактирования"
                       >
                         {task.text}
                       </span>
@@ -320,7 +249,6 @@ const App = () => {
                         onClick={() => startEdit(task)}
                         className="edit-button"
                         title="Редактировать"
-                        aria-label="Редактировать"
                       >
                         ✎
                       </button>
@@ -328,7 +256,6 @@ const App = () => {
                         onClick={() => deleteTask(task.id)}
                         className="delete-button"
                         title="Удалить"
-                        aria-label="Удалить"
                       >
                         ×
                       </button>

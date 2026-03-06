@@ -315,7 +315,7 @@
   font-size: 12px;
 }
 
-/* Адаптивность для мобильных устройств */
+
 @media (max-width: 480px) {
   .app-main {
     padding: 15px;
