@@ -1,0 +1,7 @@
+{
+  "app_id": "54470344",
+  "endpoints": ["mobile", "web"],
+  "port": "3000",
+  "http-protocol": "https",
+  "insecure": "1"
+}

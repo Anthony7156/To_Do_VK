@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import bridge from '@vkontakte/vk-bridge';
 
 const STORAGE_KEY = 'todo_app_data';
 
@@ -9,15 +10,76 @@ const App = () => {
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
   const [filter, setFilter] = useState('all');
+  
+  
+  const [vkUser, setVkUser] = useState(null);
+  const [vkPlatform, setVkPlatform] = useState('');
+  const [vkLaunchParams, setVkLaunchParams] = useState({});
+  const [vkInitialized, setVkInitialized] = useState(false);
+  const [vkTheme, setVkTheme] = useState('light');
+
+
+  useEffect(() => {
+    const initializeVK = async () => {
+      try {
+        
+        const launchParams = await bridge.send('VKWebAppGetLaunchParams');
+        console.log('📱 Параметры запуска:', launchParams);
+        setVkLaunchParams(launchParams);
+
+        
+        const clientInfo = await bridge.send('VKWebAppGetClientVersion');
+        console.log('📱 Платформа:', clientInfo);
+        setVkPlatform(clientInfo.platform);
+
+        
+        const userData = await bridge.send('VKWebAppCallAPIMethod', {
+          method: 'users.get',
+          params: {
+            fields: 'photo_100, city, country',
+            v: '5.131'
+          }
+        });
+        
+        if (userData.response && userData.response[0]) {
+          setVkUser(userData.response[0]);
+        }
+
+        
+        bridge.subscribe(({ detail: { type, data } }) => {
+          if (type === 'VKWebAppUpdateConfig') {
+            console.log('🎨 Тема обновлена:', data.appearance);
+            setVkTheme(data.appearance || 'light');
+          }
+        });
+
+        setVkInitialized(true);
+      } catch (error) {
+        console.error('❌ Ошибка получения данных VK:', error);
+        // Если не удалось получить данные VK, используем тестовые данные
+        setVkInitialized(true);
+      }
+    };
+
+    initializeVK();
+  }, []);
 
   
   useEffect(() => {
-    console.log('Loading tasks from localStorage...');
+    console.log('💾 Загрузка задач из localStorage...');
     try {
       const savedTasks = localStorage.getItem(STORAGE_KEY);
       if (savedTasks) {
         setTasks(JSON.parse(savedTasks));
-        console.log('Tasks loaded:', JSON.parse(savedTasks));
+        console.log('✅ Задачи загружены:', JSON.parse(savedTasks));
+        
+        
+        if (vkInitialized) {
+          bridge.send('VKWebAppShowSnackbar', {
+            text: '✅ Задачи загружены',
+            duration: 2000
+          }).catch(() => {});
+        }
       } else {
         
         const demoTasks = [
@@ -42,22 +104,87 @@ const App = () => {
         ];
         setTasks(demoTasks);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(demoTasks));
-        console.log('Demo tasks created');
+        console.log('📝 Демо-задачи созданы');
       }
     } catch (error) {
-      console.error('Error loading tasks:', error);
+      console.error('❌ Ошибка загрузки задач:', error);
     }
-  }, []);
+  }, [vkInitialized]);
 
   
   useEffect(() => {
     if (tasks.length > 0) {
-      console.log('Saving tasks to localStorage:', tasks);
+      console.log('💾 Сохранение задач:', tasks);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
     }
   }, [tasks]);
 
-  const addTask = (e) => {
+
+  
+  const shareTask = async (taskText) => {
+    try {
+      await bridge.send('VKWebAppShare', {
+        link: window.location.href,
+        message: `📝 Новая задача: ${taskText}`
+      });
+      console.log('✅ Задача опубликована');
+    } catch (error) {
+      console.error('❌ Ошибка публикации:', error);
+    }
+  };
+
+  const showVKAlert = async (title, message) => {
+    try {
+      await bridge.send('VKWebAppShowAlert', {
+        title: title,
+        message: message
+      });
+    } catch (error) {
+      console.error('❌ Ошибка показа алерта:', error);
+    }
+  };
+
+  const showVKConfirm = async (message) => {
+    try {
+      const result = await bridge.send('VKWebAppShowConfirm', {
+        message: message
+      });
+      return result.result; // true или false
+    } catch (error) {
+      console.error('❌ Ошибка подтверждения:', error);
+      return false;
+    }
+  };
+
+  const showVKStory = async () => {
+    try {
+      const taskStats = `Задачи: всего ${tasks.length}, выполнено ${tasks.filter(t => t.completed).length}`;
+      
+      await bridge.send('VKWebAppShowStory', {
+        background_type: 'image',
+        attachment: {
+          type: 'text',
+          text: taskStats
+        }
+      });
+    } catch (error) {
+      console.error('❌ Ошибка создания истории:', error);
+    }
+  };
+
+  const addTaskToVKNotes = async (taskText) => {
+    try {
+      await bridge.send('VKWebAppAddToNotes', {
+        text: taskText
+      });
+    } catch (error) {
+      console.error('❌ Ошибка добавления в заметки:', error);
+    }
+  };
+
+
+  
+  const addTask = async (e) => {
     e.preventDefault();
     if (!newTask.trim()) return;
 
@@ -70,10 +197,26 @@ const App = () => {
 
     setTasks([...tasks, newTaskObj]);
     setNewTask('');
+
+    try {
+      await bridge.send('VKWebAppShowSnackbar', {
+        text: '✅ Задача добавлена',
+        duration: 1500
+      });
+    } catch (error) {
+      console.log('Snackbar не поддерживается');
+    }
   };
 
-  const deleteTask = (id) => {
-    setTasks(tasks.filter(task => task.id !== id));
+  const deleteTask = async (id) => {
+    const taskToDelete = tasks.find(t => t.id === id);
+    
+
+    const confirmed = await showVKConfirm(`Удалить задачу "${taskToDelete.text}"?`);
+    
+    if (confirmed) {
+      setTasks(tasks.filter(task => task.id !== id));
+    }
   };
 
   const toggleTask = (id) => {
@@ -105,9 +248,18 @@ const App = () => {
     setEditText('');
   };
 
-  const clearCompleted = () => {
-    setTasks(tasks.filter(task => !task.completed));
+  const clearCompleted = async () => {
+    const completedCount = tasks.filter(t => t.completed).length;
+    
+    if (completedCount === 0) return;
+    
+    const confirmed = await showVKConfirm(`Удалить ${completedCount} выполненных задач?`);
+    
+    if (confirmed) {
+      setTasks(tasks.filter(task => !task.completed));
+    }
   };
+
 
   const filteredTasks = tasks.filter(task => {
     if (filter === 'active') return !task.completed;
@@ -120,18 +272,56 @@ const App = () => {
   const activeTasks = totalTasks - completedTasks;
 
   return (
-    <div className="app">
+    <div className={`app ${vkTheme === 'dark' ? 'dark-theme' : ''}`}>
       <header className="app-header">
         <h1>Мой список дел</h1>
-        <div className="user-info">
-          <img 
-            src="https://vk.com/images/camera_100.png" 
-            alt="Пользователь"
-            className="user-avatar"
-          />
-          <span className="user-name">
-            Тестовый пользователь
-          </span>
+        
+        {/* VK User Info */}
+        <div className="vk-user-info">
+          {vkUser ? (
+            <>
+              <img 
+                src={vkUser.photo_100 || 'https://vk.com/images/camera_100.png'} 
+                alt={vkUser.first_name}
+                className="user-avatar"
+              />
+              <div className="user-details">
+                <span className="user-name">
+                  {vkUser.first_name} {vkUser.last_name}
+                </span>
+                <span className="vk-platform">
+                  {vkPlatform === 'mobile' ? '📱 Мобильная версия' : '💻 Веб-версия'}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="user-info-placeholder">
+              <img 
+                src="https://vk.com/images/camera_100.png" 
+                alt="Пользователь"
+                className="user-avatar"
+              />
+              <span className="user-name">Тестовый пользователь</span>
+            </div>
+          )}
+          
+          {/* Кнопки VK действий */}
+          <div className="vk-actions">
+            <button 
+              onClick={() => showVKStory()} 
+              className="vk-action-button"
+              title="Поделиться в истории"
+            >
+              📱
+            </button>
+            <button 
+              onClick={() => showVKAlert('О приложении', 'Todo-приложение с интеграцией VK Bridge')} 
+              className="vk-action-button"
+              title="Информация"
+            >
+              ℹ️
+            </button>
+          </div>
         </div>
       </header>
 
@@ -246,6 +436,20 @@ const App = () => {
                     </div>
                     <div className="task-actions">
                       <button
+                        onClick={() => shareTask(task.text)}
+                        className="share-button"
+                        title="Поделиться"
+                      >
+                        📤
+                      </button>
+                      <button
+                        onClick={() => addTaskToVKNotes(task.text)}
+                        className="notes-button"
+                        title="Добавить в заметки"
+                      >
+                        📝
+                      </button>
+                      <button
                         onClick={() => startEdit(task)}
                         className="edit-button"
                         title="Редактировать"
@@ -276,6 +480,9 @@ const App = () => {
 
       <footer className="app-footer">
         <p>Двойной клик по задаче - редактирование</p>
+        <p className="vk-bridge-status">
+          {vkInitialized ? '✅ VK Bridge активен' : '⏳ Подключение к VK...'}
+        </p>
       </footer>
     </div>
   );
